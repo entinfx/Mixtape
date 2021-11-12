@@ -170,5 +170,5 @@ function requestNewAccessToken() {
     })
 }
 
-console.log(`${moment().format()} Listening on 8888`)
-app.listen(8888)
+console.log(`${moment().format()} Listening on ${process.env.PORT || 8888}`)
+app.listen(process.env.PORT || 8888)
