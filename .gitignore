@@ -1,3 +1,4 @@
 node_modules/
-config.json
+package-lock.json
 ecosystem.config.js
+.DS_Store

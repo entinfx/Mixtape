@@ -3,6 +3,11 @@
   "name": "mixtape",
   "description": "Spotify API experiments",
   "version": "0.0.1",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node authorization_code/app.js"
+  },
   "dependencies": {
     "cookie-parser": "^1.4.5",
     "cors": "^2.8.4",

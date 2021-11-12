@@ -1,3 +1,4 @@
+/* Libraries */
 const express = require('express')
 const request = require('request')
 const cors = require('cors')
@@ -5,18 +6,24 @@ const querystring = require('querystring')
 const cookieParser = require('cookie-parser')
 const moment = require('moment')
 
+/* Local import */
 const tools = require('../tools.js')
 
+/* App credentials */
 const clientId = process.env.MIXTAPE_CLIENT_ID
 const clientSecret = process.env.MIXTAPE_CLIENT_SECRET
 const redirectURI = process.env.MIXTAPE_REDIRECT_URI
 
+/* Variables */
 const app = express()
 const stateKey = 'spotify_auth_state'
 
+let scope = 'user-read-currently-playing' // user-read-private user-read-email user-read-currently-playing
 let accessToken = null
 let refreshToken = null
+let accessTokenExpiryTime = null
 
+/* Middleware */
 app.use(express.static(__dirname + '/public'))
 app.use(cors())
 app.use(cookieParser())
@@ -29,24 +36,26 @@ app.get('/song', (req, res) => {
         json: true
     }
 
-    // Use the access token to access the Spotify Web API
     request.get(options, (error, response, body) => {
-        if (!error && body.item) {
-            let artists = ''
+        if (error || response.statusCode !== 200) {
+            console.log(`${moment().format()} Error occurred or no song is currently playing`)
+            res.send(`It's quiet. Too quiet...`)
+        } else {
             const songName = body.item.name
             const url = body.item.external_urls.spotify
+
+            let artists = ''
 
             body.item.artists.forEach((value, key, array) => {
                 const separator = key === array.length - 1 ? '' : ', '
                 artists += `${value.name}${separator}`
             })
 
-            const song = `${artists} - ${songName} ${url}`
+            const prefix = body.is_playing ? 'Currently playing:' : 'Playback paused, last played song:'
+            const song = `${prefix} ${artists} - ${songName} ${url}`
+
             res.send(song)
             console.log(`${moment().format()} Current song requested. Currently playing: ${song}`)
-        } else {
-            console.log(`${moment().format()} Error: ${error}`)
-            res.send(`It's quiet. Too quiet...`)
         }
     })
 })
@@ -55,17 +64,15 @@ app.get('/song', (req, res) => {
 app.get('/login', (req, res) => {
     console.log(`${moment().format()} Requesting authorization`)
 
-    // Generate cookie and send it to user
     const state = tools.randomString(16)
     res.cookie(stateKey, state)
 
-    // Perform a GET request with app's client ID, redirect URI, scopes
-    // and generated cookie.
+    // Redirect user to Spotify login page, then redirect user to the /callback page
     res.redirect('https://accounts.spotify.com/authorize?' +
         querystring.stringify({
             response_type: 'code',
             client_id: clientId,
-            scope: 'user-read-private user-read-email user-read-currently-playing',
+            scope: scope,
             redirect_uri: redirectURI,
             state: state
         })
@@ -76,12 +83,10 @@ app.get('/login', (req, res) => {
 app.get('/callback', (req, res) => {
     console.log(`${moment().format()} Requesting access and refresh tokens`)
 
-    // Get users code and state
     const code = req.query.code || null
     const state = req.query.state || null
     const storedState = req.cookies ? req.cookies[stateKey] : null
 
-    // Check if users state matches stored one
     if (state === null || state !== storedState) {
         res.redirect('/#' + querystring.stringify({ error: 'state_mismatch' }))
     } else {
@@ -100,26 +105,37 @@ app.get('/callback', (req, res) => {
             json: true
         }
 
-        // Perform a POST request to request access and refresh tokens
         request.post(authOptions, (error, response, body) => {
-            if (!error && response.statusCode === 200) {
-                console.log(`${moment().format()} Access and refresh tokens obtained`)
-
+            if (error || response.statusCode !== 200) {
+                console.log(`${moment().format()} Failed to obtain access and refresh tokens`)
+                res.redirect('/#' + querystring.stringify({ error: 'invalid_token' }))
+            } else {
                 accessToken = body.access_token
                 refreshToken = body.refresh_token
+                accessTokenExpiryTime = (parseInt(body.expires_in) - 5) * 1000
+                scope = body.scope
+
+                const timer = setTimeout(() => {
+                    console.log(`${moment().format()} Access token expires soon, timer ran out`)
+                    requestNewAccessToken()
+                }, accessTokenExpiryTime)
+
+                console.log(`${moment().format()} Access and refresh tokens obtained`)
+                console.log(`${moment().format()} Set timer for access token refresh (${accessTokenExpiryTime}ms)`)
 
                 // Pass the token to browser
                 res.redirect('/#' + querystring.stringify({ access_token: accessToken, refresh_token: refreshToken }))
-            } else {
-                console.log(`${moment().format()} Failed to obtain access and refresh tokens`)
-                res.redirect('/#' + querystring.stringify({ error: 'invalid_token' }))
             }
         })
     }
 })
 
-/* Request access token from refresh token */
+/* Request new access token using refresh token */
 app.get('/refresh_token', (req, res) => {
+    requestNewAccessToken()
+})
+
+function requestNewAccessToken() {
     console.log(`${moment().format()} Requesting new access token`)
 
     const authOptions = {
@@ -129,22 +145,30 @@ app.get('/refresh_token', (req, res) => {
         },
         form: {
             grant_type: 'refresh_token',
-            refresh_token: req.query.refresh_token
+            refresh_token: refreshToken
         },
         json: true
     }
 
     request.post(authOptions, (error, response, body) => {
-        if (!error && response.statusCode === 200) {
-            const accessToken = body.access_token
-            res.send({ 'access_token': accessToken })
+        if (error || response.statusCode !== 200) {
+            console.log(`${moment().format()} Failed to obtain new access token`)
+        } else {
+            accessToken = body.access_token
+            accessTokenExpiryTime = (parseInt(body.expires_in) - 5) * 1000
+            scope = body.scope
+            // res.send({ 'access_token': accessToken })
+
+            const timer = setTimeout(() => {
+                console.log(`${moment().format()} Access token expires soon, timer ran out`)
+                requestNewAccessToken()
+            }, accessTokenExpiryTime)
 
             console.log(`${moment().format()} New access token obtained`)
-        } else {
-            console.log(`${moment().format()} Failed to obtain new access token`)
+            console.log(`${moment().format()} Set timer for access token refresh (${accessTokenExpiryTime}ms)`)
         }
     })
-})
+}
 
 console.log(`${moment().format()} Listening on 8888`)
 app.listen(8888)
