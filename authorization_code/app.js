@@ -1,69 +1,38 @@
-/* Libraries */
+/* NPM libraries */
 const express = require('express')
+const app = express()
+
 const request = require('request')
 const cors = require('cors')
 const querystring = require('querystring')
 const cookieParser = require('cookie-parser')
 const moment = require('moment')
 
-/* Local import */
+/* Local libraries */
 const tools = require('../tools.js')
 
-/* App credentials */
+/* Spotify app credentials */
 const clientId = process.env.MIXTAPE_CLIENT_ID
 const clientSecret = process.env.MIXTAPE_CLIENT_SECRET
 const redirectURI = process.env.MIXTAPE_REDIRECT_URI
-
-/* Variables */
-const app = express()
-const stateKey = 'spotify_auth_state'
-
-let scope = 'user-read-currently-playing' // user-read-private user-read-email user-read-currently-playing
-let accessToken = null
-let refreshToken = null
-let accessTokenExpiryTime = null
 
 /* Middleware */
 app.use(express.static(__dirname + '/public'))
 app.use(cors())
 app.use(cookieParser())
 
-/* Request currently playing song */
-app.get('/song', (req, res) => {
-    const options = {
-        url: 'https://api.spotify.com/v1/me/player/currently-playing',
-        headers: { 'Authorization': 'Bearer ' + accessToken },
-        json: true
-    }
-
-    request.get(options, (error, response, body) => {
-        if (error || response.statusCode !== 200) {
-            console.log(`${moment().format()} Error occurred or no song is currently playing`)
-            res.send(`It's quiet. Too quiet...`)
-        } else {
-            const songName = body.item.name
-            const url = body.item.external_urls.spotify
-
-            let artists = ''
-
-            body.item.artists.forEach((value, key, array) => {
-                const separator = key === array.length - 1 ? '' : ', '
-                artists += `${value.name}${separator}`
-            })
-
-            const prefix = body.is_playing ? 'Currently playing:' : 'Playback paused, last played song:'
-            const song = `${prefix} ${artists} - ${songName} ${url}`
-
-            res.send(song)
-            console.log(`${moment().format()} Current song requested. Currently playing: ${song}`)
-        }
-    })
-})
+/* Variables */
+const stateKey = 'spotify_auth_state'
+let scope = 'user-read-currently-playing'
+let accessToken = null
+let refreshToken = null
+let accessTokenExpiryTime = null
 
 /* Request authorization */
 app.get('/login', (req, res) => {
     console.log(`${moment().format()} Requesting authorization`)
 
+    // Generate and set cookie 
     const state = tools.randomString(16)
     res.cookie(stateKey, state)
 
@@ -169,6 +138,38 @@ function requestNewAccessToken() {
         }
     })
 }
+
+/* Request currently playing song */
+app.get('/song', (req, res) => {
+    const options = {
+        url: 'https://api.spotify.com/v1/me/player/currently-playing',
+        headers: { 'Authorization': 'Bearer ' + accessToken },
+        json: true
+    }
+
+    request.get(options, (error, response, body) => {
+        if (error || response.statusCode !== 200) {
+            console.log(`${moment().format()} Error occurred or no song is currently playing`)
+            res.send(`It's quiet. Too quiet...`)
+        } else {
+            const songName = body.item.name
+            const url = body.item.external_urls.spotify
+
+            let artists = ''
+
+            body.item.artists.forEach((value, key, array) => {
+                const separator = key === array.length - 1 ? '' : ', '
+                artists += `${value.name}${separator}`
+            })
+
+            const prefix = body.is_playing ? 'Currently playing:' : 'Playback paused, last played song:'
+            const song = `${prefix} ${artists} - ${songName} ${url}`
+
+            res.send(song)
+            console.log(`${moment().format()} Current song requested. Currently playing: ${song}`)
+        }
+    })
+})
 
 console.log(`${moment().format()} Listening on ${process.env.PORT || 8888}`)
 app.listen(process.env.PORT || 8888)
